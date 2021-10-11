@@ -1,16 +1,17 @@
 package com.example.cameraxvideorecording
 
+import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
 import android.util.Log
+import android.view.MotionEvent
 import android.widget.Toast
-import androidx.camera.core.CameraSelector
-import androidx.camera.core.ImageCapture
-import androidx.camera.core.ImageCaptureException
-import androidx.camera.core.Preview
+import androidx.camera.core.*
+import androidx.camera.core.impl.VideoCaptureConfig
 import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.constraintlayout.widget.ConstraintSet
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.example.cameraxvideorecording.databinding.ActivityMainBinding
@@ -21,11 +22,16 @@ import java.util.*
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
+@SuppressLint("RestrictedApi")
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
 
     private var imageCapture: ImageCapture? = null
+
+    //For video capture
+    private lateinit var videoCapture: VideoCapture
+
 
     private lateinit var outputDirectory: File
     private lateinit var cameraExecutor: ExecutorService
@@ -50,8 +56,12 @@ class MainActivity : AppCompatActivity() {
             )
         }
 
-        binding.startrecordBtn.setOnClickListener { takePhoto() }
+
         outputDirectory = getOutputDirectory()
+
+        binding.startRecordBtn.setOnClickListener { startRecording() }
+
+        binding.stopRecordBtn.setOnClickListener { stopRecording() }
 
     }
 
@@ -61,6 +71,46 @@ class MainActivity : AppCompatActivity() {
         }
         return if (mediaDir != null && mediaDir.exists())
             mediaDir else filesDir
+    }
+
+
+    private fun startRecording() {
+//        binding.recordBtn.text="Recording"
+
+
+        // Create time-stamped output file to hold the image
+        val file = File(
+            outputDirectory,
+            "${System.currentTimeMillis()}.mp4"
+        )
+
+        val outputFileOptions = VideoCapture.OutputFileOptions.Builder(file).build()
+
+
+        videoCapture.startRecording(
+            outputFileOptions,
+            ContextCompat.getMainExecutor(this),
+            object : VideoCapture.OnVideoSavedCallback {
+                override fun onVideoSaved(outputFileResults: VideoCapture.OutputFileResults) {
+                    Toast.makeText(
+                        applicationContext,
+                        "Video saved${outputFileResults.savedUri}",
+                        Toast.LENGTH_SHORT
+                    ).show()
+
+                    Log.d(TAG,"Video location ${outputFileResults.savedUri}")
+                }
+
+                override fun onError(videoCaptureError: Int, message: String, cause: Throwable?) {
+                    Toast.makeText(applicationContext, "Error while recodrding", Toast.LENGTH_SHORT)
+                        .show()
+                }
+            })
+    }
+
+
+    private fun stopRecording() {
+        videoCapture.stopRecording()
     }
 
     private fun takePhoto() {
@@ -127,24 +177,36 @@ class MainActivity : AppCompatActivity() {
         cameraProviderFuture.addListener(Runnable {
             val cameraProvider = cameraProviderFuture.get()
 
+            //Surface provider builder
             val preview = Preview.Builder()
                 .build()
                 .also {
                     it.setSurfaceProvider(binding.previewView.surfaceProvider)
                 }
 
-            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+            //camera selector
+//            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+
+            val cameraSelector =
+                CameraSelector.Builder().requireLensFacing(CameraSelector.LENS_FACING_BACK).build()
+
+            //Video recording configuration
+            videoCapture = VideoCapture.Builder()
+                .setCameraSelector(cameraSelector)
+//                .setTargetRotation(binding.previewView.display.rotation)
+                .build()
+
+//            videoCapture = VideoCapture(videoCaptureConfig)
+
 
             try {
                 cameraProvider.unbindAll()
                 cameraProvider.bindToLifecycle(
-                    this, cameraSelector, preview)
-            }
-            catch(exc: Exception) {
+                    this, cameraSelector, preview, videoCapture
+                )
+            } catch (exc: Exception) {
                 Log.e(TAG, "Use case binding failed", exc)
             }
-
-
 
 
         }, ContextCompat.getMainExecutor(this))
