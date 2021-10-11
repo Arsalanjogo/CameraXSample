@@ -6,15 +6,18 @@ import android.net.Uri
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
 import android.util.Log
-import android.view.MotionEvent
 import android.widget.Toast
 import androidx.camera.core.*
-import androidx.camera.core.impl.VideoCaptureConfig
 import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.constraintlayout.widget.ConstraintSet
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.example.cameraxvideorecording.databinding.ActivityMainBinding
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.pose.Pose
+import com.google.mlkit.vision.pose.PoseDetection
+import com.google.mlkit.vision.pose.PoseDetector
+import com.google.mlkit.vision.pose.PoseLandmark
+import com.google.mlkit.vision.pose.accurate.AccuratePoseDetectorOptions
 import java.io.File
 import java.lang.Exception
 import java.text.SimpleDateFormat
@@ -23,6 +26,7 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
 @SuppressLint("RestrictedApi")
+@androidx.camera.core.ExperimentalGetImage
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
@@ -35,6 +39,8 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var outputDirectory: File
     private lateinit var cameraExecutor: ExecutorService
+
+    private lateinit var poseDetector: PoseDetector
 
     private val TAG = "MainActivity"
 
@@ -63,7 +69,19 @@ class MainActivity : AppCompatActivity() {
 
         binding.stopRecordBtn.setOnClickListener { stopRecording() }
 
+        setupPoseDetector()
+
     }
+
+    private fun setupPoseDetector() {
+        // Pose Detect
+        val options = AccuratePoseDetectorOptions.Builder()
+            .setDetectorMode(AccuratePoseDetectorOptions.STREAM_MODE)
+            .build()
+
+        poseDetector = PoseDetection.getClient(options)
+    }
+
 
     private fun getOutputDirectory(): File {
         val mediaDir = externalMediaDirs.firstOrNull()?.let {
@@ -98,7 +116,7 @@ class MainActivity : AppCompatActivity() {
                         Toast.LENGTH_SHORT
                     ).show()
 
-                    Log.d(TAG,"Video location ${outputFileResults.savedUri}")
+                    Log.d(TAG, "Video location ${outputFileResults.savedUri}")
                 }
 
                 override fun onError(videoCaptureError: Int, message: String, cause: Throwable?) {
@@ -190,6 +208,7 @@ class MainActivity : AppCompatActivity() {
             val cameraSelector =
                 CameraSelector.Builder().requireLensFacing(CameraSelector.LENS_FACING_BACK).build()
 
+
             //Video recording configuration
             videoCapture = VideoCapture.Builder()
                 .setCameraSelector(cameraSelector)
@@ -198,11 +217,47 @@ class MainActivity : AppCompatActivity() {
 
 //            videoCapture = VideoCapture(videoCaptureConfig)
 
+            //Pose detection configuration
+
+
+            val imageAnalysis = ImageAnalysis.Builder()
+                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .build()
+
+            imageAnalysis.setAnalyzer(
+                ContextCompat.getMainExecutor(this),
+                ImageAnalysis.Analyzer { imageProxy ->
+
+                    val mediaImage = imageProxy.image
+
+                    if (mediaImage != null) {
+                        val image = InputImage.fromMediaImage(
+                            mediaImage,
+                            imageProxy.imageInfo.rotationDegrees
+                        )
+
+                        // Pass image to an ML Kit Vision API
+                        poseDetector.process(image)
+                            .addOnSuccessListener { pose -> drawPose(pose) }
+                            .addOnFailureListener {
+                                Toast.makeText(
+                                    this,
+                                    "Pose detection failed on the current image",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                    }
+
+
+                })
+
+
+
 
             try {
                 cameraProvider.unbindAll()
                 cameraProvider.bindToLifecycle(
-                    this, cameraSelector, preview, videoCapture
+                    this, cameraSelector, preview, videoCapture, imageAnalysis
                 )
             } catch (exc: Exception) {
                 Log.e(TAG, "Use case binding failed", exc)
@@ -213,6 +268,42 @@ class MainActivity : AppCompatActivity() {
 
 
     }
+
+    private fun drawPose(pose: Pose) {
+
+        if (binding.previewView.childCount>1){
+            binding.previewView.removeAllViews()
+        }
+
+        //Detect all landmarks from the image
+        if (pose.allPoseLandmarks.isNotEmpty()) {
+
+
+            if (binding.previewView.childCount>1){
+                binding.previewView.removeAllViews()
+            }
+
+
+            //if landmarks are not empty draw them
+
+            val poseCanvasCustomView = Draw(applicationContext, pose)
+
+            binding.previewView.addView(poseCanvasCustomView)
+        }
+
+
+    }
+
+    private fun drawPosPoints(
+        lShoulderX: Float,
+        lShoulderY: Float,
+        rShoulderX: Float,
+        rShoulderY: Float
+    ) {
+
+
+    }
+
 
     private fun allPermissionGranted() =
         Constants.requiredPermission.all {
@@ -225,4 +316,21 @@ class MainActivity : AppCompatActivity() {
         cameraExecutor.shutdown()
     }
 
+
+//    internal class PoseAnalyzer:ImageAnalysis.Analyzer{
+//
+//        override fun analyze(imageProxy: ImageProxy) {
+//            val mediaImage = imageProxy.image
+//
+//            if (mediaImage!=null){
+//                val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
+//
+//                // Pass image to an ML Kit Vision API
+//
+//
+//            }
+//
+//        }
+//
+//    }
 }
